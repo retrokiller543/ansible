@@ -18,20 +18,20 @@
       changed_when: false
 
     - name: Check for available updates (Debian/Ubuntu)
-      shell: apt list --upgradable 2>/dev/null | grep -c upgradable || echo "0"
+      shell: "apt list --upgradable 2>/dev/null | grep -c upgradable || echo '0'"
       register: updates_available_deb
       when: ansible_os_family == "Debian"
       changed_when: false
 
     - name: Check for available updates (RHEL/CentOS)
-      shell: yum check-update --quiet | grep -E '^[^[:space:]]+' | wc -l || echo "0"
+      shell: "yum check-update --quiet | grep -E '^[^[:space:]]+' | wc -l || echo '0'"
       register: updates_available_rpm
       when: ansible_os_family == "RedHat"
       changed_when: false
       ignore_errors: yes
 
     - name: Get network interfaces
-      shell: ip -o link show | awk -F': ' '{print $2}' | grep -v lo | head -5
+      shell: "ip -o link show | awk -F': ' '{print $2}' | grep -v lo | head -5"
       register: network_interfaces
       changed_when: false
 
@@ -42,7 +42,7 @@
       ignore_errors: yes
 
     - name: Get Docker containers if Docker exists
-      shell: docker ps --format "table {{.Names}}\t{{.Status}}" | tail -n +2 | wc -l
+      shell: "docker ps --format 'table {{.Names}}\\t{{.Status}}' | tail -n +2 | wc -l"
       register: docker_containers
       when: docker_check.rc == 0
       changed_when: false
