@@ -1,0 +1,118 @@
+---
+- name: Gather detailed system information
+  hosts: all
+  gather_facts: yes
+  become: yes
+  
+  tasks:
+    - name: Get installed packages count (Debian/Ubuntu)
+      shell: dpkg --get-selections | wc -l
+      register: package_count_deb
+      when: ansible_os_family == "Debian"
+      changed_when: false
+
+    - name: Get installed packages count (RHEL/CentOS)
+      shell: rpm -qa | wc -l
+      register: package_count_rpm
+      when: ansible_os_family == "RedHat"
+      changed_when: false
+
+    - name: Check for available updates (Debian/Ubuntu)
+      shell: apt list --upgradable 2>/dev/null | grep -c upgradable || echo "0"
+      register: updates_available_deb
+      when: ansible_os_family == "Debian"
+      changed_when: false
+
+    - name: Check for available updates (RHEL/CentOS)
+      shell: yum check-update --quiet | grep -E '^[^[:space:]]+' | wc -l || echo "0"
+      register: updates_available_rpm
+      when: ansible_os_family == "RedHat"
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Get network interfaces
+      shell: ip -o link show | awk -F': ' '{print $2}' | grep -v lo | head -5
+      register: network_interfaces
+      changed_when: false
+
+    - name: Check if Docker is installed
+      shell: which docker
+      register: docker_check
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Get Docker containers if Docker exists
+      shell: docker ps --format "table {{.Names}}\t{{.Status}}" | tail -n +2 | wc -l
+      register: docker_containers
+      when: docker_check.rc == 0
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Check systemd services status
+      shell: systemctl list-units --failed --no-legend | wc -l
+      register: failed_services
+      changed_when: false
+
+    - name: Generate system report
+      debug:
+        msg: |
+          📋 SYSTEM REPORT for {{ inventory_hostname }}
+          ═══════════════════════════════════════════════
+          🖥️  Hostname: {{ ansible_hostname }}
+          🏷️  FQDN: {{ ansible_fqdn }}
+          🐧 OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          🏗️  Architecture: {{ ansible_architecture }}
+          🧠 CPU: {{ ansible_processor_vcpus }} cores ({{ ansible_processor[2] if ansible_processor|length > 2 else 'Unknown' }})
+          💾 Total Memory: {{ (ansible_memtotal_mb/1024)|round(1) }} GB
+          💿 Root Disk: {{ ansible_mounts[0].size_total|int // 1024 // 1024 // 1024 }} GB ({{ ((ansible_mounts[0].size_total - ansible_mounts[0].size_available)|int * 100 / ansible_mounts[0].size_total|int)|round(1) }}% used)
+          
+          📦 Package Information:
+          {% if ansible_os_family == "Debian" %}
+          • Installed packages: {{ package_count_deb.stdout }}
+          • Available updates: {{ updates_available_deb.stdout }}
+          {% elif ansible_os_family == "RedHat" %}
+          • Installed packages: {{ package_count_rpm.stdout }}
+          • Available updates: {{ updates_available_rpm.stdout }}
+          {% endif %}
+          
+          🌐 Network:
+          • Primary IP: {{ ansible_default_ipv4.address | default('N/A') }}
+          • Interfaces: {{ network_interfaces.stdout_lines | join(', ') }}
+          
+          🔧 Services:
+          • Failed systemd services: {{ failed_services.stdout }}
+          {% if docker_check.rc == 0 %}
+          • Docker containers: {{ docker_containers.stdout | default('0') }}
+          {% else %}
+          • Docker: Not installed
+          {% endif %}
+          
+          ⏰ Last boot: {{ ansible_date_time.iso8601 }}
+          📍 Timezone: {{ ansible_date_time.tz }}
+
+    - name: Save system report to file
+      copy:
+        content: |
+          System Report for {{ inventory_hostname }}
+          Generated: {{ ansible_date_time.iso8601 }}
+          ═══════════════════════════════════════════════
+          Hostname: {{ ansible_hostname }}
+          FQDN: {{ ansible_fqdn }}
+          OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          Architecture: {{ ansible_architecture }}
+          CPU Cores: {{ ansible_processor_vcpus }}
+          Total Memory: {{ (ansible_memtotal_mb/1024)|round(1) }} GB
+          Primary IP: {{ ansible_default_ipv4.address | default('N/A') }}
+          {% if ansible_os_family == "Debian" %}
+          Installed packages: {{ package_count_deb.stdout }}
+          Available updates: {{ updates_available_deb.stdout }}
+          {% elif ansible_os_family == "RedHat" %}
+          Installed packages: {{ package_count_rpm.stdout }}
+          Available updates: {{ updates_available_rpm.stdout }}
+          {% endif %}
+          Failed services: {{ failed_services.stdout }}
+          {% if docker_check.rc == 0 %}
+          Docker containers: {{ docker_containers.stdout | default('0') }}
+          {% endif %}
+        dest: "/tmp/system-report-{{ inventory_hostname }}.txt"
+        mode: '0644'

@@ -1,0 +1,51 @@
+---
+- name: Check system connectivity and basic info
+  hosts: all
+  gather_facts: yes
+  
+  tasks:
+    - name: Test connection and gather basic facts
+      ping:
+      register: ping_result
+
+    - name: Get system uptime
+      command: uptime
+      register: uptime_result
+      changed_when: false
+
+    - name: Check disk space
+      shell: df -h / | tail -1 | awk '{print $5}' | sed 's/%//'
+      register: disk_usage
+      changed_when: false
+
+    - name: Check memory usage
+      shell: free | grep Mem | awk '{printf "%.1f", ($3/$2) * 100.0}'
+      register: memory_usage
+      changed_when: false
+
+    - name: Check load average
+      shell: uptime | awk -F'load average:' '{print $2}' | xargs
+      register: load_average
+      changed_when: false
+
+    - name: Display system status
+      debug:
+        msg: |
+          ✅ Host: {{ inventory_hostname }}
+          🖥️  System: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          🏠 Architecture: {{ ansible_architecture }}
+          ⏰ Uptime: {{ uptime_result.stdout }}
+          💾 Memory Usage: {{ memory_usage.stdout }}%
+          💿 Disk Usage: {{ disk_usage.stdout }}%
+          📊 Load Average: {{ load_average.stdout }}
+          🌐 IP Address: {{ ansible_default_ipv4.address | default('N/A') }}
+          🔧 Ansible can manage this host: {{ ping_result is succeeded }}
+
+    - name: Log connection check
+      local_action:
+        module: lineinfile
+        path: /tmp/semaphore/connection-check.log
+        line: "{{ ansible_date_time.iso8601 }} - {{ inventory_hostname }} - Status: OK - Disk: {{ disk_usage.stdout }}% - Memory: {{ memory_usage.stdout }}%"
+        create: yes
+      delegate_to: localhost
+      run_once: false

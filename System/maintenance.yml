@@ -1,0 +1,90 @@
+---
+- name: Basic system maintenance
+  hosts: all
+  become: yes
+  gather_facts: yes
+  
+  vars:
+    log_retention_days: 30
+    temp_cleanup_days: 7
+  
+  tasks:
+    - name: Clean package cache (Debian/Ubuntu)
+      apt:
+        autoclean: yes
+        autoremove: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Clean package cache (RHEL/CentOS)
+      yum:
+        autoremove: yes
+      when: ansible_os_family == "RedHat"
+
+    - name: Clean old log files
+      find:
+        paths: /var/log
+        age: "{{ log_retention_days }}d"
+        recurse: yes
+        patterns: "*.log.*.gz,*.log.*"
+      register: old_logs
+
+    - name: Remove old compressed log files
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ old_logs.files }}"
+      when: old_logs.files is defined
+
+    - name: Clean temporary files
+      find:
+        paths: /tmp
+        age: "{{ temp_cleanup_days }}d"
+        file_type: file
+      register: temp_files
+
+    - name: Remove old temporary files
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ temp_files.files }}"
+      when: temp_files.files is defined and temp_files.files|length < 100
+
+    - name: Clean old journal logs
+      shell: journalctl --vacuum-time=30d
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Update locate database
+      command: updatedb
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Check and fix file system (dry run)
+      shell: fsck -n / 2>/dev/null || echo "Filesystem check completed"
+      register: fsck_result
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Sync filesystem
+      command: sync
+      changed_when: false
+
+    - name: Generate maintenance report
+      debug:
+        msg: |
+          🧹 MAINTENANCE COMPLETED for {{ inventory_hostname }}
+          ═══════════════════════════════════════════════
+          ✅ Package cache cleaned
+          🗂️  Old logs removed: {{ old_logs.files|length if old_logs.files is defined else 0 }} files
+          🗑️  Temp files removed: {{ temp_files.files|length if temp_files.files is defined else 0 }} files  
+          📰 Journal logs cleaned
+          📍 Locate database updated
+          💾 Filesystem synced
+          ⏰ Completed: {{ ansible_date_time.iso8601 }}
+
+    - name: Log maintenance completion
+      lineinfile:
+        path: /var/log/ansible-maintenance.log
+        line: "{{ ansible_date_time.iso8601 }} - Maintenance completed on {{ inventory_hostname }} - Logs: {{ old_logs.files|length if old_logs.files is defined else 0 }}, Temp: {{ temp_files.files|length if temp_files.files is defined else 0 }}"
+        create: yes
+        mode: '0644'
